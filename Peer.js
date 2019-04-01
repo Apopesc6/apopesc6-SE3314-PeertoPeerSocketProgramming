@@ -1,7 +1,10 @@
-let net = require('net'),
-    singleton = require('./Singleton');
-peerResPacket = require('./PeerResponsePacket');
-peerReqPacket = require('./PeerRequestPacket');
+const net = require('net'),
+    singleton = require('./Singleton'),
+    peerResPacket = require('./PeerResponsePacket'),
+    fs = require('fs'),
+    imageResPacket = require('./ImageResponsePacket'),
+    opn = require('opn'),
+    peerReqPacket = require('./PeerRequestPacket');
 
 //generate a random port number
 var portNum = Math.floor((Math.random() * 30000) + 1);
@@ -11,6 +14,8 @@ var maxPeers;
 var declinedPeers = [];
 var joinTable = [];
 var pendingTable = [];
+var imageName;
+const imageFolder = './images/'
 
 //set the ip and port number for the peer
 let HOST = '127.0.0.1',
@@ -39,15 +44,28 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
     maxPeers = parseInt(process.argv[3]);
     console.log('This peer address is ' + HOST + ':' + PORT + ' located at p' + peerID);
 
-//CLIENT FUNCTIONALITY -----------------------------------------------------------------------------------------------------------------------
-} else { 
+    //CLIENT FUNCTIONALITY -----------------------------------------------------------------------------------------------------------------------
+} else {
 
-    /*NOTE: THE USER CAN ONLY TYPE THE COMMAND IN THE FORMAT: node peer -p [address] -n[numPeers] */
+    /*NOTE: THE USER CAN ONLY TYPE THE COMMAND IN THE FORMAT: node peer -p [address] -n[numPeers] -q[imageName] */
+    /*OR: node peer -p [address] -q[imageName] */
+    /*OR: node peer -p [address] -n[numPeers] */
     /*OR JUST: node peer -p [address]*/
 
-    //Setting maxPeers based on the command
-    if (process.argv.length == 6) {
+
+    //Setting and imageName maxPeers based on the command
+    if (process.argv[4] == '-n' && process.argv[6] == '-q') {
+        imageName = process.argv[7];
         maxPeers = parseInt(process.argv[5]);
+        peerReqPacket.setImageName(imageName);
+    }
+    else if (process.argv[4] == '-n') {
+        maxPeers = parseInt(process.argv[5]);
+    }
+    else if (process.argv[4] == '-q') {
+        imageName = process.argv[5];
+        maxPeers = 6;
+        peerReqPacket.setImageName(imageName);
     } else {
         maxPeers = 6;
     }
@@ -74,7 +92,7 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
         //sets the ip and port of that peer object
         peerObj.ip = connectHOST;
         peerObj.port = connectPORT;
-        
+
         pendingTable.push(peerObj);
 
         //send the peer message packet to the other peer 
@@ -84,147 +102,98 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
     //when the peer trying to connect receives an acknowledgement packet back
     peerClient.on('data', function (data) {
 
-        console.log(pendingTable);
-        pendingTable.pop();
-        console.log(pendingTable);
+        if (data.length == 100) { //IF IT IS A PEER RESPONSE PACKET (they have a fixed length of 100)
+    
+            //remove the peer from the pending table
+            pendingTable.pop();
 
-        var recMsg = data.readIntBE(3, 1);
-        var recID = data.readIntBE(4, 4);
-        var numP = data.readIntBE(8, 4);
+            //read the packet
+            var recMsg = data.readIntBE(3, 1);
+            var recID = data.readIntBE(4, 4);
+            var numP = data.readIntBE(8, 4);
 
-        //array of received peers
-        var peersReceived = [];
+            //array of received peers
+            var peersReceived = [];
 
-        //for reading the end of the packet that stores the port and ip of each peer
-        for (let j = 0; j < numP; j++) {
-            var recIParr = [];
-            var recPort = data.readIntBE(14 + (6 * j), 2);
-            recIParr[0] = data.readIntBE(16 + (6 * j), 1);
-            recIParr[1] = data.readIntBE(17 + (6 * j), 1);
-            recIParr[2] = data.readIntBE(18 + (6 * j), 1);
-            recIParr[3] = data.readIntBE(19 + (6 * j), 1);
+            //for reading the end of the packet that stores the port and ip of each peer
+            for (let j = 0; j < numP; j++) {
+                var recIParr = [];
+                var recPort = data.readIntBE(14 + (6 * j), 2);
+                recIParr[0] = data.readIntBE(16 + (6 * j), 1);
+                recIParr[1] = data.readIntBE(17 + (6 * j), 1);
+                recIParr[2] = data.readIntBE(18 + (6 * j), 1);
+                recIParr[3] = data.readIntBE(19 + (6 * j), 1);
 
-            //converts back to string
-            var recIP = (recIParr[0] + '.' + recIParr[1] + '.' + recIParr[2] + '.' + recIParr[3]);
+                //converts back to string
+                var recIP = (recIParr[0] + '.' + recIParr[1] + '.' + recIParr[2] + '.' + recIParr[3]);
 
-            //creates a peer object to store the ip and port in
-            let peerObj = {
-                ip: '',
-                port: 0
-            };
+                //creates a peer object to store the ip and port in
+                let peerObj = {
+                    ip: '',
+                    port: 0
+                };
 
-            //sets the ip and port of that peer object
-            peerObj.ip = recIP;
-            peerObj.port = recPort;
+                //sets the ip and port of that peer object
+                peerObj.ip = recIP;
+                peerObj.port = recPort;
 
-            //pushes the peer object to the array
-            peersReceived.push(peerObj);
-        }
-
-        //updates the number of peers (if the received message is 1 for welcome)
-        if (recMsg == 1) {
-            numPeers = numPeers + 1;
-            //if the received message is 1, add to the peer table (successful connection)
-            peerResPacket.addToPeerTable(connectHOST, parseInt(connectPORT));
-        }
-
-        if(numP>recID){
-            peerID = numP + 1;
-        }else if(numP<=recID){
-            peerID = recID + 1;
-        }
-        
-        if (declinedPeers.length == 0) {
-            //console logging the output like the examples
-            console.log("Connected to peer p" + recID + ":" + connectPORT + " at timestamp: " + singleton.getTimestamp());
-            console.log('This peer address is ' + HOST + ':' + PORT + ' located at p' + peerID);
-            console.log("Received ack from p" + recID + ":" + connectPORT);
-        } else {
-            //console logging the output like the examples
-            console.log("Connected to peer p" + recID + ":" + joinTable[0].port + " at timestamp: " + singleton.getTimestamp());
-            console.log('This peer address is ' + HOST + ':' + PORT + ' located at p' + peerID);
-            console.log("Received ack from p" + recID + ":" + joinTable[0].port);
-        }
-
-
-        //for printing out the peers that it is connected to other than itself
-        for (let i = 0; i < numP; i++) {
-            if (peersReceived[i].port != PORT || peersReceived[i].ip != HOST) {
-                console.log(" which is peered with: " + peersReceived[i].ip + ":" + peersReceived[i].port);
+                //pushes the peer object to the array
+                peersReceived.push(peerObj);
             }
-        }
 
-        var peerTable = peerResPacket.getPeerTable();
+            //updates the number of peers (if the received message is 1 for welcome)
+            if (recMsg == 1) {
+                numPeers = numPeers + 1;
+                //if the received message is 1, add to the peer table (successful connection)
+                peerResPacket.addToPeerTable(connectHOST, parseInt(connectPORT));
+            }
 
-        //if it receives back a message type of 2 (redirect)
-        if (recMsg == 2) {
-            console.log("Join redirected, trying to connect to another peer in the network....");
+            //assigning the peer IDs
+            if (numP > recID) {
+                peerID = numP + 1;
+            } else if (numP <= recID) {
+                peerID = recID + 1;
+            }
 
             if (declinedPeers.length == 0) {
-                //creates a peer object to store the ip and port in
-                let peerObj = {
-                    ip: '',
-                    port: 0
-                };
-                //sets the ip and port of that peer object
-                peerObj.ip = connectHOST;
-                peerObj.port = connectPORT;
-                //adding to the declined peers table
-                declinedPeers.push(peerObj);
+                //console logging the output like the examples
+                console.log("Connected to peer p" + recID + ":" + connectPORT + " at timestamp: " + singleton.getTimestamp());
+                console.log('This peer address is ' + HOST + ':' + PORT + ' located at p' + peerID);
+                console.log("Received ack from p" + recID + ":" + connectPORT);
             } else {
-                //creates a peer object to store the ip and port in
-                let peerObj = {
-                    ip: '',
-                    port: 0
-                };
-                //sets the ip and port of that peer object
-                peerObj.ip = joinTable[0].ip;
-                peerObj.port = joinTable[0].port;
-                //adding to the declined peers table
-                declinedPeers.push(peerObj);
+                //console logging the output like the examples
+                console.log("Connected to peer p" + recID + ":" + joinTable[0].port + " at timestamp: " + singleton.getTimestamp());
+                console.log('This peer address is ' + HOST + ':' + PORT + ' located at p' + peerID);
+                console.log("Received ack from p" + recID + ":" + joinTable[0].port);
             }
 
-            //removing the peer with the failed connection from the join table
-            joinTable.shift();
 
-            //nested for loops to determine if there is a returned peer that can be added to the join table
-            for (let i = 0; i < peersReceived.length; i++) {
-                var connectablePeer = true;
-                //sees if the peer is in the declined table
-                for (let j = 0; j < declinedPeers.length; j++) {
-                    if (peersReceived[i].port == declinedPeers[j].port && peersReceived[i].ip == declinedPeers[j].ip) {
-                        connectablePeer = false;
-                    }
+            //for printing out the peers that it is connected to other than itself
+            for (let i = 0; i < numP; i++) {
+                if (peersReceived[i].port != PORT || peersReceived[i].ip != HOST) {
+                    console.log(" which is peered with: " + peersReceived[i].ip + ":" + peersReceived[i].port);
                 }
-                //sees if the peer is already in the peer table
-                for (let y = 0; y < peerTable.length; y++) {
-                    if (peersReceived[i].port == peerTable[y].port && peersReceived[i].ip == peerTable[y].ip) {
-                        connectablePeer = false;
-                    }
-                }
+            }
 
-                //if it's in neither table, add it to the join table (potential peer that can be joined if a connection fails)
-                if (connectablePeer == true) {
-                    let peerObject = {
+            var peerTable = peerResPacket.getPeerTable();
+
+            //if it receives back a message type of 2 (redirect)
+            if (recMsg == 2) {
+                console.log("Join redirected, trying to connect to another peer in the network....");
+
+                if (declinedPeers.length == 0) {
+                    //creates a peer object to store the ip and port in
+                    let peerObj = {
                         ip: '',
                         port: 0
                     };
                     //sets the ip and port of that peer object
-                    peerObject.ip = peersReceived[i].ip;
-                    peerObject.port = peersReceived[i].port;
-                    //adds to join table
-                    joinTable.push(peerObject);
-                }
-            }
-
-            peerClient.destroy();
-
-            if (joinTable.length > 0) {
-                //creating a new peer packet to connect
-                peerReqPacket.init(1, numPeers, HOST, PORT);
-                //connecting to the new peer
-                peerClient.connect(joinTable[0].port, joinTable[0].ip, function () {
-
+                    peerObj.ip = connectHOST;
+                    peerObj.port = connectPORT;
+                    //adding to the declined peers table
+                    declinedPeers.push(peerObj);
+                } else {
+                    //creates a peer object to store the ip and port in
                     let peerObj = {
                         ip: '',
                         port: 0
@@ -232,17 +201,94 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
                     //sets the ip and port of that peer object
                     peerObj.ip = joinTable[0].ip;
                     peerObj.port = joinTable[0].port;
-                    //pushes it to the pending peers table
-                    pendingTable.push(peerObj);
+                    //adding to the declined peers table
+                    declinedPeers.push(peerObj);
+                }
 
-                    //send the peer message packet to the other peer 
-                    peerClient.write(peerReqPacket.getPacket());
-                });
-            } else {
-                console.log('Unable to connect to any peers in the network');
+                //removing the peer with the failed connection from the join table
+                joinTable.shift();
+
+                //nested for loops to determine if there is a returned peer that can be added to the join table
+                for (let i = 0; i < peersReceived.length; i++) {
+                    var connectablePeer = true;
+                    //sees if the peer is in the declined table
+                    for (let j = 0; j < declinedPeers.length; j++) {
+                        if (peersReceived[i].port == declinedPeers[j].port && peersReceived[i].ip == declinedPeers[j].ip) {
+                            connectablePeer = false;
+                        }
+                    }
+                    //sees if the peer is already in the peer table
+                    for (let y = 0; y < peerTable.length; y++) {
+                        if (peersReceived[i].port == peerTable[y].port && peersReceived[i].ip == peerTable[y].ip) {
+                            connectablePeer = false;
+                        }
+                    }
+
+                    //if it's in neither table, add it to the join table (potential peer that can be joined if a connection fails)
+                    if (connectablePeer == true) {
+                        let peerObject = {
+                            ip: '',
+                            port: 0
+                        };
+                        //sets the ip and port of that peer object
+                        peerObject.ip = peersReceived[i].ip;
+                        peerObject.port = peersReceived[i].port;
+                        //adds to join table
+                        joinTable.push(peerObject);
+                    }
+                }
+
+                peerClient.destroy();
+
+                if (joinTable.length > 0) {
+                    //creating a new peer packet to connect
+                    peerReqPacket.init(1, numPeers, HOST, PORT);
+                    //connecting to the new peer
+                    peerClient.connect(joinTable[0].port, joinTable[0].ip, function () {
+
+                        let peerObj = {
+                            ip: '',
+                            port: 0
+                        };
+                        //sets the ip and port of that peer object
+                        peerObj.ip = joinTable[0].ip;
+                        peerObj.port = joinTable[0].port;
+
+                        //pushes it to the pending peers table
+                        pendingTable.push(peerObj);
+
+                        //send the peer message packet to the other peer 
+                        peerClient.write(peerReqPacket.getPacket());
+                    });
+                } else {
+                    console.log('Unable to connect to any peers in the network');
+                }
+            }
+        } else { //IF IT IS AN IMAGE PACKET
+             //reads all of the data from the response packet and stores it in variables
+            var responseType = data.readIntBE(3, 1);
+            var sequenceNum = data.readIntBE(4, 3);
+            var timeStamp = data.readIntBE(7, 5);
+            var fileSize = data.readIntBE(13, 3);
+
+            //slices the header off of the packet, and stores the image data in this variable
+            var file = data.slice(16);
+
+            if (responseType == 1){
+                console.log("Image Received from server of size: "+fileSize+" mb.")
+                console.log("At time stamp: "+timeStamp);
+                console.log("With sequence number: "+sequenceNum);
+            }else if (responseType == 2){
+                console.log("Image not found, querying other peers.")
             }
 
+             //using the libraries to save the file and open the file
+            if (responseType == 1){
+                fs.writeFileSync(imageName, file);
+                opn(imageName).then(()=>{});
+            }
         }
+
     });
 
 }
@@ -250,41 +296,82 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
 
 //(Peer2PeerDB)
 //SERVER FUNCTIONALITY --------------------------------------------------------------------------------------------------------------------------
-peerServer.on('connection', function(sock) {
+peerServer.on('connection', function (sock) {
     //increase the number of peers
     numPeers = numPeers + 1;
-    
+
     //when the peer acting as the server receives a message packet
-    sock.on('data',readRespond);
-    function readRespond(data){
-        
+    sock.on('data', readRespond);
+    function readRespond(data) {
+
+        var passedFileName = (data.toString('utf-8', 20, 32)).toString(); //the file name
+
         //read the port and ip from the packet
-        var receivedPort = data.readIntBE(14,2);
+        var receivedPort = data.readIntBE(14, 2);
         var recIParr = [];
-        recIParr[0]=data.readIntBE(16,1);
-        recIParr[1]=data.readIntBE(17,1);
-        recIParr[2]=data.readIntBE(18,1); 
-        recIParr[3]=data.readIntBE(19,1);
+        recIParr[0] = data.readIntBE(16, 1);
+        recIParr[1] = data.readIntBE(17, 1);
+        recIParr[2] = data.readIntBE(18, 1);
+        recIParr[3] = data.readIntBE(19, 1);
 
         //converts back to string
-        var receivedIP = (recIParr[0]+'.'+recIParr[1]+'.'+recIParr[2]+'.'+recIParr[3]);
-        
+        var receivedIP = (recIParr[0] + '.' + recIParr[1] + '.' + recIParr[2] + '.' + recIParr[3]);
+
         var msgType;
 
         //if there are less than 3 peers, set message type to 1 for welcome and output that the connection was successful
-        if (numPeers <= maxPeers){
+        if (numPeers <= maxPeers) {
             msgType = 1;
-            console.log("Connected from peer "+receivedIP+":"+receivedPort);
+            console.log("Connected from peer " + receivedIP + ":" + receivedPort);
             peerResPacket.addToPeerTable(receivedIP, receivedPort);
-        }else{ //otherwise set the message type to 2 and output that the peer has been redirected
+        } else { //otherwise set the message type to 2 and output that the peer has been redirected
             numPeers = numPeers - 1;
             msgType = 2;
-            console.log("Peer table full: "+receivedIP+":"+receivedPort+" redirected");
+            console.log("Peer table full: " + receivedIP + ":" + receivedPort + " redirected");
         }
 
         //Create the ack packet to send back to the peer attempting to connect
         peerResPacket.init(msgType, peerID, numPeers);
         sock.write(peerResPacket.getPacket());
+
+        //HANDLES THE IMAGE QUERIES
+        if (msgType == 1 && !(passedFileName.includes('NULL'))) { //Only performs the image searches if the message type is 1 (meaning that the peer can connect).
+
+            //This will remove any extra white space from the buffer and create the correct file name to be used for searching purposes later
+            if (passedFileName.includes("swan.jpg") || passedFileName.includes("Swan.jpg")) {
+                passedFileName = 'Swan.jpg';
+            } else if (passedFileName.includes("flicker.jpg") || passedFileName.includes("Flicker.jpg")) {
+                passedFileName = 'Flicker.jpg';
+            } else if (passedFileName.includes("parrot.jpg") || passedFileName.includes("Parrot.jpg")) {
+                passedFileName = 'Parrot.jpg';
+            } else if (passedFileName.includes("cardinal.jpg") || passedFileName.includes("Cardinal.jpg")) {
+                passedFileName = 'Cardinal.jpg';
+            } else if (passedFileName.includes("flamingo.jpg") || passedFileName.includes("Flamingo.jpg")) {
+                passedFileName = 'Flamingo.jpg';
+            }
+
+            //gets an array of file names from the 'images' folder
+            var foundFiles = [];
+            fs.readdirSync(imageFolder).forEach(file => {
+                foundFiles.push(file);
+            });
+
+            //search to see if file name extracted from the packet is in the array of file names extracted from the images folder.
+            var responseMsg = 2; //set to 2 for not found
+            for (let i = 0; i < foundFiles.length; i++) {
+                if (passedFileName == foundFiles[i]) {
+                    responseMsg = 1; //if it finds the file, sets it to 1 for found
+                    break;
+                }
+            }
+
+            //create the image response packet
+            imageResPacket.init(3314, responseMsg, singleton.getSequenceNumber(), singleton.getTimestamp(), passedFileName);
+            //send it back to the client
+            sock.write(imageResPacket.getPacket());
+
+        }
+
 
     }
 

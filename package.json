@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "is-wsl": "^1.1.0",
-    "net": "^1.0.2"
+    "net": "^1.0.2",
+    "opn": "^6.0.0"
   }
 }

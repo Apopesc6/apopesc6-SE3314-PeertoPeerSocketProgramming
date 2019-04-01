@@ -1,6 +1,6 @@
 //set the packet header equal to a buffer of 16 bytes
 var packet = Buffer.alloc(32); 
-var imageName = '';
+var imageName = 'NULL';
 
 module.exports = {
 
@@ -25,7 +25,7 @@ module.exports = {
         packet.writeIntBE(IP[1], 17, 1);
         packet.writeIntBE(IP[2], 18, 1);
         packet.writeIntBE(IP[3], 19, 1);
-        packet.write(imageName,20,12,'utf-8');
+        packet.write(imageName, 20, 12, 'utf-8');
     },
   
     setImageName: function(name){

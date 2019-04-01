@@ -1,6 +1,6 @@
 
 //set the packet header equal to a buffer of 16 bytes
-var packet = Buffer.alloc(50); 
+var packet = Buffer.alloc(100); 
 
 var peeringTable = [];
 

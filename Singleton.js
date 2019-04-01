@@ -1,6 +1,7 @@
 var timeStamp;
-//the singleton contains a time stamp 
-var packetSingleton = {timeStamp};
+var sequenceNum;
+//the singleton contains a time stamp and a sequence number
+var packetSingleton = {timeStamp, sequenceNum};
 
 module.exports = {
 
@@ -18,6 +19,16 @@ module.exports = {
             }
         },10);
 
+        //initialize the sequence number as random
+        var randSeqNum = Math.floor((Math.random()*999)+1);
+        packetSingleton.sequenceNum = randSeqNum;
+    },
+
+   
+    getSequenceNumber: function() {
+        //returns the packet sequence number and increments it
+        packetSingleton.seqenceNum = packetSingleton.seqenceNum + 1;
+        return packetSingleton.sequenceNum;
     },
 
     getTimestamp: function() {
