@@ -1,6 +1,7 @@
 //set the packet header equal to a buffer of 16 bytes
 var packet = Buffer.alloc(32); 
 var imageName = 'NULL';
+var searchID;
 
 module.exports = {
 
@@ -11,7 +12,13 @@ module.exports = {
         packet.writeIntBE(protocolVersion,0,3);
         packet.writeIntBE(messageType,3,1);
         packet.writeIntBE(senderID,4,4);
-        packet.writeIntBE(44,8,4);//currently a constant number, will be the search ID afterwards (need to implement)
+
+        if(messageType == 3){ //for search packet
+            packet.writeIntBE(searchID,8,4);//currently a constant number, will be the search ID afterwards (need to implement)
+        }else{
+            packet.writeIntBE(44,8,4);//otherwise set to constant number
+        }
+
         packet.writeIntBE(0,12,2);
         packet.writeIntBE(passedPort,14,2);
 
@@ -30,6 +37,21 @@ module.exports = {
   
     setImageName: function(name){
         imageName = name;
+    },
+
+    updateSearchID: function(passedID){
+        if(searchID != null){
+            var tempString = searchID.toString();
+            tempString = tempString + passedID;
+
+            searchID = parseInt(tempString);
+        }else{
+            searchID = passedID;
+        }
+    },
+
+    getSearchID: function(){
+        return searchID;
     },
 
     //Returns the packet

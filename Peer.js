@@ -15,7 +15,7 @@ var declinedPeers = [];
 var joinTable = [];
 var pendingTable = [];
 var imageName;
-const imageFolder = './images/'
+const imageFolder = './images/';
 
 //set the ip and port number for the peer
 let HOST = '127.0.0.1',
@@ -80,7 +80,7 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
     var peerClient = new net.Socket();
 
     //creates the peer message packet
-    peerReqPacket.init(1, numPeers, HOST, PORT);
+    peerReqPacket.init(0, numPeers, HOST, PORT);
 
     //peer acting as a client connects to the peer acting as a server
     peerClient.connect(connectPORT, connectHOST, function () {
@@ -103,7 +103,7 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
     peerClient.on('data', function (data) {
 
         if (data.length == 100) { //IF IT IS A PEER RESPONSE PACKET (they have a fixed length of 100)
-    
+
             //remove the peer from the pending table
             pendingTable.pop();
 
@@ -145,7 +145,7 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
             if (recMsg == 1) {
                 numPeers = numPeers + 1;
                 //if the received message is 1, add to the peer table (successful connection)
-                peerResPacket.addToPeerTable(connectHOST, parseInt(connectPORT));
+                peerResPacket.addToPeerTable(connectHOST, parseInt(connectPORT),recID);
             }
 
             //assigning the peer IDs
@@ -242,7 +242,7 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
 
                 if (joinTable.length > 0) {
                     //creating a new peer packet to connect
-                    peerReqPacket.init(1, numPeers, HOST, PORT);
+                    peerReqPacket.init(0, numPeers, HOST, PORT);
                     //connecting to the new peer
                     peerClient.connect(joinTable[0].port, joinTable[0].ip, function () {
 
@@ -264,8 +264,8 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
                     console.log('Unable to connect to any peers in the network');
                 }
             }
-        } else { //IF IT IS AN IMAGE PACKET
-             //reads all of the data from the response packet and stores it in variables
+        }  else { //IF IT IS AN IMAGE PACKET
+            //reads all of the data from the response packet and stores it in variables
             var responseType = data.readIntBE(3, 1);
             var sequenceNum = data.readIntBE(4, 3);
             var timeStamp = data.readIntBE(7, 5);
@@ -274,24 +274,27 @@ if (process.argv.length == 2) { //USER JUST TYPES node peer
             //slices the header off of the packet, and stores the image data in this variable
             var file = data.slice(16);
 
-            if (responseType == 1){
-                console.log("Image Received from server of size: "+fileSize+" mb.")
-                console.log("At time stamp: "+timeStamp);
-                console.log("With sequence number: "+sequenceNum);
-            }else if (responseType == 2){
-                console.log("Image not found, querying other peers.")
+            if (responseType == 1) {
+                console.log("Image Received from server of size: " + fileSize + " mb.");
+                console.log("At time stamp: " + timeStamp);
+                console.log("With sequence number: " + sequenceNum);
             }
 
-             //using the libraries to save the file and open the file
-            if (responseType == 1){
+            //using the libraries to save the file and open the file
+            if (responseType == 1) {
                 fs.writeFileSync(imageName, file);
-                opn(imageName).then(()=>{});
+                opn(imageName).then(() => { });
             }
         }
 
     });
 
 }
+
+
+
+
+
 
 
 //(Peer2PeerDB)
@@ -317,27 +320,101 @@ peerServer.on('connection', function (sock) {
         //converts back to string
         var receivedIP = (recIParr[0] + '.' + recIParr[1] + '.' + recIParr[2] + '.' + recIParr[3]);
 
-        var msgType;
+        if (data.readIntBE(3,1) != 3 && data.length == 32) { //IF IT IS NOT A SEARCH QUERY PACKET
+            var msgType;
 
-        //if there are less than 3 peers, set message type to 1 for welcome and output that the connection was successful
-        if (numPeers <= maxPeers) {
-            msgType = 1;
-            console.log("Connected from peer " + receivedIP + ":" + receivedPort);
-            peerResPacket.addToPeerTable(receivedIP, receivedPort);
-        } else { //otherwise set the message type to 2 and output that the peer has been redirected
-            numPeers = numPeers - 1;
-            msgType = 2;
-            console.log("Peer table full: " + receivedIP + ":" + receivedPort + " redirected");
+            //if there are less than 3 peers, set message type to 1 for welcome and output that the connection was successful
+            if (numPeers <= maxPeers) {
+                msgType = 1;
+                console.log("Connected from peer " + receivedIP + ":" + receivedPort);
+                //adding the required information to the peer table
+                var storedID;
+                if (numPeers > peerID) {
+                    storedID = numPeers + 1;
+                } else if (numPeers <= peerID) {
+                    storedID = peerID + 1;
+                }
+                peerResPacket.addToPeerTable(receivedIP, receivedPort,storedID);
+                
+
+            } else { //otherwise set the message type to 2 and output that the peer has been redirected
+                numPeers = numPeers - 1;
+                msgType = 2;
+                console.log("Peer table full: " + receivedIP + ":" + receivedPort + " redirected");
+            }
+
+            //Create the ack packet to send back to the peer attempting to connect
+            peerResPacket.init(msgType, peerID, numPeers);
+            sock.write(peerResPacket.getPacket());
+
+            //HANDLES THE IMAGE QUERIES
+            if (msgType == 1 && !(passedFileName.includes('NULL'))) { //Only performs the image searches if the message type is 1 (meaning that the peer can connect).
+
+                //This will remove any extra white space from the buffer and create the correct file name to be used for searching purposes later
+                if (passedFileName.includes("swan.jpg") || passedFileName.includes("Swan.jpg")) {
+                    passedFileName = 'Swan.jpg';
+                } else if (passedFileName.includes("flicker.jpg") || passedFileName.includes("Flicker.jpg")) {
+                    passedFileName = 'Flicker.jpg';
+                } else if (passedFileName.includes("parrot.jpg") || passedFileName.includes("Parrot.jpg")) {
+                    passedFileName = 'Parrot.jpg';
+                } else if (passedFileName.includes("cardinal.jpg") || passedFileName.includes("Cardinal.jpg")) {
+                    passedFileName = 'Cardinal.jpg';
+                } else if (passedFileName.includes("flamingo.jpg") || passedFileName.includes("Flamingo.jpg")) {
+                    passedFileName = 'Flamingo.jpg';
+                }
+
+                //gets an array of file names from the 'images' folder
+                var foundFiles = [];
+                fs.readdirSync(imageFolder).forEach(file => {
+                    foundFiles.push(file);
+                });
+
+                //search to see if file name extracted from the packet is in the array of file names extracted from the images folder.
+                var responseMsg = 2; //set to 2 for not found
+                for (let i = 0; i < foundFiles.length; i++) {
+                    if (passedFileName == foundFiles[i]) {
+                        responseMsg = 1; //if it finds the file, sets it to 1 for found
+                        break;
+                    }
+                }
+
+                //create the image response packet
+                imageResPacket.init(3314, responseMsg, singleton.getSequenceNumber(), singleton.getTimestamp(), passedFileName);
+                //send it back to the client
+                sock.write(imageResPacket.getPacket());
+
+                if (responseMsg == 2) { //if it's not found, query other peers
+                    console.log("Image not found, querying other peers.");
+                    peerReqPacket.updateSearchID(storedID);
+                    peerReqPacket.updateSearchID(peerID);
+
+                    peerReqPacket.setImageName(passedFileName);
+
+                    //create a search packet
+                    peerReqPacket.init(3, peerID, receivedIP, receivedPort);
+                    
+                    let searchTable = peerResPacket.getPeerTable();
+
+                    //remove the peers that have already been searched from the table to be searched for peers
+                    for (let i = 0; i < searchTable.length; i++){
+                        if(searchTable[i].id == storedID || searchTable[i].id == peerID){
+                            searchTable.splice(i,1);
+                        }
+                    }
+                    
+                    let peerSearchClient = new net.Socket();
+
+                    peerSearchClient.connect(searchTable[0].port, searchTable[0].ip, function () {
+                        peerSearchClient.write(peerReqPacket.getPacket());
+                    });
+
+                }
+
+            }
         }
 
-        //Create the ack packet to send back to the peer attempting to connect
-        peerResPacket.init(msgType, peerID, numPeers);
-        sock.write(peerResPacket.getPacket());
+        else if (data.readIntBE(3,1) == 3 && data.length == 32) {//IF IT IS A SEARCH QUERY PACKET
 
-        //HANDLES THE IMAGE QUERIES
-        if (msgType == 1 && !(passedFileName.includes('NULL'))) { //Only performs the image searches if the message type is 1 (meaning that the peer can connect).
-
-            //This will remove any extra white space from the buffer and create the correct file name to be used for searching purposes later
             if (passedFileName.includes("swan.jpg") || passedFileName.includes("Swan.jpg")) {
                 passedFileName = 'Swan.jpg';
             } else if (passedFileName.includes("flicker.jpg") || passedFileName.includes("Flicker.jpg")) {
@@ -350,28 +427,100 @@ peerServer.on('connection', function (sock) {
                 passedFileName = 'Flamingo.jpg';
             }
 
-            //gets an array of file names from the 'images' folder
-            var foundFiles = [];
+            var foundFileNames = [];
             fs.readdirSync(imageFolder).forEach(file => {
-                foundFiles.push(file);
+                foundFileNames.push(file);
             });
 
+
             //search to see if file name extracted from the packet is in the array of file names extracted from the images folder.
-            var responseMsg = 2; //set to 2 for not found
-            for (let i = 0; i < foundFiles.length; i++) {
-                if (passedFileName == foundFiles[i]) {
-                    responseMsg = 1; //if it finds the file, sets it to 1 for found
+            var foundMsg = 2; //set to 2 for not found
+            for (let i = 0; i < foundFileNames.length; i++) {
+                if (passedFileName == foundFileNames[i]) {
+                    foundMsg = 1; //if it finds the file, sets it to 1 for found
                     break;
                 }
             }
 
-            //create the image response packet
-            imageResPacket.init(3314, responseMsg, singleton.getSequenceNumber(), singleton.getTimestamp(), passedFileName);
-            //send it back to the client
-            sock.write(imageResPacket.getPacket());
 
+            if(foundMsg == 2){
+                
+                //converting the search id to an array of integers to compare to peer table (to see which peers have already viewed the table)
+                let searchID = data.readIntBE(8,4).toString();
+                let searchedPeers = [];
+                for(let i = 0; i<searchID.length;i++){
+                    searchedPeers[i] = parseInt(searchID[i]);
+                }
+
+                //comparing IDs of peers who've already viewed the packet vs the ids of the peer's peer table
+                let searchTable = peerResPacket.getPeerTable();
+                
+
+                for (let i = 0; i < searchTable.length; i++){
+                    for (let j = 0; j <searchedPeers.length;j++){
+                        if (searchTable[i].id == searchedPeers[j]){
+                            searchTable.splice(i,1);
+                        }
+                    }
+                }
+                
+                if(searchTable.length != 0){
+                    console.log('Image not found, querying other peers.');
+
+                    //adding to the search id
+                    peerReqPacket.updateSearchID(peerID);
+
+                    peerReqPacket.setImageName(passedFileName);
+                    peerReqPacket.init(3, peerID, receivedIP, receivedPort);
+                    
+                    let peerSearchClient = new net.Socket();
+
+                    peerSearchClient.connect(searchTable[0].port, searchTable[0].ip, function () {
+                        peerSearchClient.write(peerReqPacket.getPacket());
+                    });
+
+                }else{
+                    console.log('Could not find image in the peer network.')
+                }
+
+
+            }else{
+                console.log('Image found, sending back to original peer.');
+
+                //create the image response packet
+                imageResPacket.init(3314, 1, singleton.getSequenceNumber(), singleton.getTimestamp(), passedFileName);
+                let peerSearchClient = new net.Socket();
+
+                peerSearchClient.connect(receivedPort, receivedIP, function () {
+                    //send it back to the client
+                    peerSearchClient.write(imageResPacket.getPacket());
+                });
+            }
+
+
+
+        }else{ //IF THERE IS ANOTHER PEER IN THE NETWORK DIRECTLY CONNECTING TO SEND THE FOUND IMAGE
+            //reads all of the data from the response packet and stores it in variables
+            var responseType = data.readIntBE(3, 1);
+            var sequenceNum = data.readIntBE(4, 3);
+            var timeStamp = data.readIntBE(7, 5);
+            var fileSize = data.readIntBE(13, 3);
+
+            //slices the header off of the packet, and stores the image data in this variable
+            var file = data.slice(16);
+
+            if (responseType == 1) {
+                console.log("Image Received from server of size: " + fileSize + " mb.");
+                console.log("At time stamp: " + timeStamp);
+                console.log("With sequence number: " + sequenceNum);
+            }
+
+            //using the libraries to save the file and open the file
+            if (responseType == 1) {
+                fs.writeFileSync(imageName, file);
+                opn(imageName).then(() => { });
+            }
         }
-
 
     }
 
@@ -380,6 +529,6 @@ peerServer.on('connection', function (sock) {
     });
 
     sock.on('error', function (err) {
-      
+
     })
 });

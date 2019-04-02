@@ -36,15 +36,17 @@ module.exports = {
 
     },
 
-    addToPeerTable:function(ipAddr,portNum){
+    addToPeerTable:function(ipAddr,portNum,passedID){
 
         let peerObj = {
             ip: '',
-            port: 0
+            port: 0,
+            id: 0
         };
 
         peerObj.ip = ipAddr;
         peerObj.port = portNum;
+        peerObj.id = passedID;
 
         peeringTable.push(peerObj);
     },
